@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:test/Activity/Scan.dart';
+import 'package:test/Pages/Scan.dart';
 
 
 class SplashScreen extends StatefulWidget {
