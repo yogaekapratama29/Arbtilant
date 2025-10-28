@@ -4,38 +4,32 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:test/Data/dataTret.dart';
-import 'package:tflite_v2/tflite_v2.dart';
+import 'package:arbtilant/Data/data_treat.dart';
+import 'package:arbtilant/Controller/model_controller.dart';
 
 class Scan extends StatefulWidget {
-  const Scan({Key? key}) : super(key: key);
+  const Scan({super.key});
 
   @override
-  _ScanState createState() => _ScanState();
+  State<Scan> createState() => _ScanState();
 }
 
 class _ScanState extends State<Scan> {
   CameraController? _camController;
-  List? _hasilPred;
   Image? image;
   String? pathDir;
   DataTreat dt = DataTreat();
+  ModelController modelController = ModelController();
 
   @override
   void initState() {
     super.initState();
-    FutureBuilder(future: loadModel(), builder: (_, snap) => Text(""));
+    loadModel();
   }
 
   Future<String?> loadModel() async {
-    String? res = await Tflite.loadModel(
-      model: "assets/model/model.tflite",
-      labels: "assets/model/labels.txt",
-      numThreads: 1,
-      isAsset: true,
-      useGpuDelegate: false,
-    );
-    return res;
+    await modelController.loadModel();
+    return "Model loaded";
   }
 
   Future<void> initCamera() async {
@@ -48,10 +42,10 @@ class _ScanState extends State<Scan> {
     Directory root = await getTemporaryDirectory();
     String dir = "${root.path}/TANAMAN";
     await Directory(dir).create(recursive: true);
-    String filePath = "${dir}/${DateTime.now()}.jpg";
+    String filePath = "$dir/${DateTime.now().millisecondsSinceEpoch}.jpg";
     try {
-      XFile? img = await _camController!.takePicture();
-      img.saveTo(filePath);
+      XFile img = await _camController!.takePicture();
+      await img.saveTo(filePath);
     } catch (e) {
       log("Error : ${e.toString()}");
     }
@@ -59,16 +53,8 @@ class _ScanState extends State<Scan> {
   }
 
   Future<dynamic> predict(String path) async {
-    var prediksi = await Tflite.runModelOnImage(
-      path: path,
-      imageMean: 0.0,
-      imageStd: 255.0,
-      numResults: 3,
-      threshold: 0.2,
-      asynch: true,
-    );
-    log("prediksi : ${prediksi}");
-    return prediksi;
+    // Use ModelController for prediction
+    return await modelController.runModelOnImage(path);
   }
 
   @override
@@ -118,46 +104,63 @@ class _ScanState extends State<Scan> {
                       if (!_camController!.value.isTakingPicture) {
                         pathDir = null;
                         pathDir = await takePicture();
-                        log("hasil : ${pathDir}");
-                        showModalBottomSheet(
-                          context: context,
-                          builder: ((context) {
-                            return FutureBuilder(
-                              future: predict(pathDir!),
-                              builder: (_, snap) {
-                                return (snap.connectionState ==
-                                        ConnectionState.done)
-                                    ? Padding(
-                                        padding: const EdgeInsets.only(
-                                          left: 30,
-                                        ),
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.start,
-                                          children: [
-                                            const SizedBox(height: 30),
-                                            const Align(
-                                              alignment:
-                                                  AlignmentDirectional.topStart,
-                                              child: Text(
-                                                "Hasil Pengecekan :",
-                                                style: TextStyle(
-                                                  fontFamily: "Poppins",
-                                                  fontSize: 18,
-                                                  color: Colors.black,
-                                                  fontWeight: FontWeight.bold,
+                        log("hasil : $pathDir");
+                        final currentContext = context;
+                        if (mounted) {
+                          showModalBottomSheet(
+                            context: currentContext,
+                            builder: (context) {
+                              return FutureBuilder(
+                                future: predict(pathDir!),
+                                builder: (_, snap) {
+                                  return (snap.connectionState ==
+                                          ConnectionState.done)
+                                      ? Padding(
+                                          padding: const EdgeInsets.only(
+                                            left: 30,
+                                          ),
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.start,
+                                            children: [
+                                              const SizedBox(height: 30),
+                                              const Align(
+                                                alignment: AlignmentDirectional
+                                                    .topStart,
+                                                child: Text(
+                                                  "Hasil Pengecekan :",
+                                                  style: TextStyle(
+                                                    fontFamily: "Poppins",
+                                                    fontSize: 18,
+                                                    color: Colors.black,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 20),
-                                            Row(
-                                              children: [
-                                                Image.asset(
-                                                  "assets/virus.png",
-                                                  fit: BoxFit.cover,
-                                                ),
-                                                Text(
-                                                  "${snap.data[0]['label']}",
+                                              const SizedBox(height: 20),
+                                              Row(
+                                                children: [
+                                                  Image.asset(
+                                                    "assets/virus.png",
+                                                    fit: BoxFit.cover,
+                                                  ),
+                                                  Text(
+                                                    snap.data[0]['label'],
+                                                    style: const TextStyle(
+                                                      fontFamily: "Poppins",
+                                                      fontSize: 18,
+                                                      color: Colors.black,
+                                                      fontWeight:
+                                                          FontWeight.normal,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 15),
+                                              Align(
+                                                alignment: Alignment.topLeft,
+                                                child: Text(
+                                                  "Confidence : ${snap.data[0]['confidence']}",
                                                   style: const TextStyle(
                                                     fontFamily: "Poppins",
                                                     fontSize: 18,
@@ -166,54 +169,43 @@ class _ScanState extends State<Scan> {
                                                         FontWeight.normal,
                                                   ),
                                                 ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 15),
-                                            Align(
-                                              alignment: Alignment.topLeft,
-                                              child: Text(
-                                                "Confidence : ${snap.data[0]['confidence']}",
-                                                style: const TextStyle(
-                                                  fontFamily: "Poppins",
-                                                  fontSize: 18,
-                                                  color: Colors.black,
-                                                  fontWeight: FontWeight.normal,
+                                              ),
+                                              const SizedBox(height: 20),
+                                              const Align(
+                                                alignment: Alignment.topLeft,
+                                                child: Text(
+                                                  "Treatment : ",
+                                                  style: TextStyle(
+                                                    fontFamily: "Poppins",
+                                                    fontSize: 18,
+                                                    color: Colors.black,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 20),
-                                            const Align(
-                                              alignment: Alignment.topLeft,
-                                              child: Text(
-                                                "Treatment : ",
-                                                style: TextStyle(
-                                                  fontFamily: "Poppins",
-                                                  fontSize: 18,
-                                                  color: Colors.black,
-                                                  fontWeight: FontWeight.bold,
+                                              Align(
+                                                alignment: Alignment.topLeft,
+                                                child: Text(
+                                                  dt.treatment[snap
+                                                      .data[0]['index']],
+                                                  style: const TextStyle(
+                                                    fontFamily: "Poppins",
+                                                    fontSize: 18,
+                                                    color: Colors.black,
+                                                    fontWeight:
+                                                        FontWeight.normal,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                            Align(
-                                              alignment: Alignment.topLeft,
-                                              child: Text(
-                                                "${dt.treatment[snap.data[0]['index']]}",
-                                                style: const TextStyle(
-                                                  fontFamily: "Poppins",
-                                                  fontSize: 18,
-                                                  color: Colors.black,
-                                                  fontWeight: FontWeight.normal,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      )
-                                    : const CircularProgressIndicator();
-                              },
-                            );
-                          }),
-                        );
+                                            ],
+                                          ),
+                                        )
+                                      : const CircularProgressIndicator();
+                                },
+                              );
+                            },
+                          );
+                        }
                         setState(() {});
                       }
                     },
