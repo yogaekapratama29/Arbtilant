@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:test/Pages/SplashScreen.dart';
-
-
+import 'package:arbtilant/Pages/splash_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -10,7 +8,6 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -24,4 +21,3 @@ class MyApp extends StatelessWidget {
     );
   }
 }
-

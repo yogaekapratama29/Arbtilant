@@ -1,4 +1,4 @@
-name: test
+name: arbtilant
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -35,10 +35,10 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   camera: ^0.11.2+1
-  image_picker: ^1.2.0
   path_provider: ^2.1.5
-  permission_handler: ^12.0.1
-  tflite_v2: ^1.0.0
+  google_fonts: ^6.2.1
+  tflite_flutter: ^0.12.0
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:
