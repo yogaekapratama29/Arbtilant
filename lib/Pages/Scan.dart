@@ -53,7 +53,6 @@ class _ScanState extends State<Scan> {
   }
 
   Future<dynamic> predict(String path) async {
-    // Use ModelController for prediction
     return await modelController.runModelOnImage(path);
   }
 
@@ -66,6 +65,7 @@ class _ScanState extends State<Scan> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(automaticallyImplyLeading: true),
       backgroundColor: Colors.white,
       body: FutureBuilder(
         future: initCamera(),
