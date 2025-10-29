@@ -1,0 +1,3 @@
+- [x] Update pixel access in _preprocessImage to use pixel.r, pixel.g, pixel.b instead of img.getRed, etc.
+- [ ] Ensure return type matches by casting channels to double
+- [ ] Test build to confirm fixes
