@@ -3,17 +3,17 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:arbtilant/Data/data_treat.dart';
 import 'package:arbtilant/Controller/model_controller.dart';
 import 'package:arbtilant/Services/scan_history_service.dart';
 import 'package:arbtilant/Services/feedback_service.dart';
 import 'package:arbtilant/Services/disease_service.dart';
+import 'package:arbtilant/Models/scan_result_model.dart';
 import 'package:arbtilant/Widgets/feedback_dialog.dart';
 import 'package:arbtilant/Widgets/custom_bottom_nav.dart';
-import 'package:arbtilant/core/constants/colors.dart';
-import 'package:arbtilant/Pages/disease_detail_page.dart';
+import 'package:arbtilant/core/design_system/index.dart';
+import 'package:arbtilant/Pages/scan_detail_page.dart';
 import 'package:arbtilant/Pages/home_page.dart';
 import 'package:arbtilant/Pages/library_page_new.dart';
 import 'package:arbtilant/Pages/history_page.dart';
@@ -38,6 +38,11 @@ class _ScanPageState extends State<ScanPage> {
   String? _lastScanResultId;
   int _selectedIndex = 1;
   late Future<void> _initCameraFuture;
+
+  // Camera mode and settings
+  String _cameraMode = 'MACRO'; // MACRO, AUTO, WIDE
+  bool _flashEnabled = false;
+  double _zoomLevel = 1.0;
 
   @override
   void initState() {
@@ -86,11 +91,23 @@ class _ScanPageState extends State<ScanPage> {
       await Directory(dir).create(recursive: true);
       String filePath = "$dir/${DateTime.now().millisecondsSinceEpoch}.jpg";
 
+      debugPrint("📷 Taking picture...");
       XFile img = await _camController!.takePicture();
+      debugPrint("✅ Picture taken, saving to: $filePath");
+
       await img.saveTo(filePath);
+
+      // Verify file was saved
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw Exception('Failed to save picture to $filePath');
+      }
+      final fileSize = await file.length();
+      debugPrint("✅ Picture saved successfully ($fileSize bytes)");
+
       return filePath;
     } catch (e) {
-      log("Error taking picture: ${e.toString()}");
+      debugPrint("❌ Error taking picture: ${e.toString()}");
       rethrow;
     }
   }
@@ -111,10 +128,11 @@ class _ScanPageState extends State<ScanPage> {
     try {
       // Take picture
       _imagePath = await _takePicture();
-      log("Image path: $_imagePath");
+      debugPrint("✅ Image path: $_imagePath");
 
       // Run prediction
       final results = await _predict(_imagePath!);
+      debugPrint("✅ Prediction results: ${results.length} predictions");
 
       if (results.isNotEmpty) {
         final topResult = results[0];
@@ -129,26 +147,40 @@ class _ScanPageState extends State<ScanPage> {
             break;
           }
         }
+        debugPrint("✅ Disease ID: $diseaseId");
 
         // Save to history
-        final scanResult = await _scanHistoryService.saveScanResult(
-          diseaseId: diseaseId,
-          imagePath: _imagePath!,
-          predictedLabel: topResult['label'],
-          confidence: topResult['confidence'],
-          top3Predictions: results,
-          modelVersion: '1.0',
-        );
+        try {
+          final scanResult = await _scanHistoryService.saveScanResult(
+            diseaseId: diseaseId,
+            imagePath: _imagePath!,
+            predictedLabel: topResult['label'],
+            confidence: topResult['confidence'],
+            top3Predictions: results,
+            modelVersion: '1.0',
+          );
+          debugPrint("✅ Scan result saved: ${scanResult.id}");
 
-        _lastScanResultId = scanResult.id;
+          _lastScanResultId = scanResult.id;
 
-        // Show result
-        if (mounted) {
-          _showResultBottomSheet(results, diseaseId);
+          // Show result
+          if (mounted) {
+            _showResultBottomSheet(results, diseaseId, scanResult);
+          }
+        } catch (e) {
+          debugPrint("❌ Error saving scan result: $e");
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error saving scan: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
-      log("Error during scan: $e");
+      debugPrint("❌ Error during scan: $e");
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -162,136 +194,240 @@ class _ScanPageState extends State<ScanPage> {
   void _showResultBottomSheet(
     List<Map<String, dynamic>> results,
     String diseaseId,
+    ScanResultModel scanResult,
   ) {
     final topResult = results[0];
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: AppColors.darkBackground,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          minChildSize: 0.4,
-          maxChildSize: 0.9,
+          initialChildSize: 0.8,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
           expand: false,
           builder: (context, scrollController) {
             return SingleChildScrollView(
               controller: scrollController,
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Handle bar
                     Center(
                       child: Container(
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
+                          color: AppColors.lightSurface,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
-
-                    const SizedBox(height: 20),
-
-                    // Title
-                    Text(
-                      'Hasil Deteksi',
-                      style: GoogleFonts.poppins(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Image preview
-                    if (_imagePath != null)
+                    const SizedBox(height: AppSpacing.lg),
+                    // Image preview with error handling - use permanent path from scanResult
+                    if (scanResult.imagePath.isNotEmpty)
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.file(
-                          File(_imagePath!),
-                          height: 150,
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.cardBorderRadius,
+                        ),
+                        child: Container(
+                          height: 240,
                           width: double.infinity,
-                          fit: BoxFit.cover,
+                          color: AppColors.lightSurface,
+                          child: _buildImagePreview(scanResult.imagePath),
                         ),
                       ),
-
-                    const SizedBox(height: 16),
-
-                    // Result card
+                    const SizedBox(height: AppSpacing.lg),
+                    // Detection result
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(AppSpacing.lg),
                       decoration: BoxDecoration(
-                        color: AppColors.mediumGreen.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.mediumGreen),
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.cardBorderRadius,
+                        ),
+                        border: Border.all(
+                          color: AppColors.brightGreen,
+                          width: 1,
+                        ),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Image.asset(
-                            "assets/virus.png",
-                            width: 40,
-                            height: 40,
+                          Text(
+                            'DETECTED',
+                            style: AppTypography.bodySmall(
+                              color: AppColors.brightGreen,
+                            ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            topResult['label'],
+                            style: AppTypography.displayMedium(),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            'Confidence Score',
+                            style: AppTypography.bodySmall(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: LinearProgressIndicator(
+                              value: topResult['confidence'],
+                              minHeight: 8,
+                              backgroundColor: AppColors.lightSurface,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                _getConfidenceColor(topResult['confidence']),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            '${(topResult['confidence'] * 100).toStringAsFixed(0)}%',
+                            style: AppTypography.headline(
+                              color: _getConfidenceColor(
+                                topResult['confidence'],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    // Other possibilities
+                    Text(
+                      'Other Possibilities',
+                      style: AppTypography.headline(),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    ...results.skip(1).take(2).toList().asMap().entries.map((
+                      entry,
+                    ) {
+                      final result = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              result['label'],
+                              style: AppTypography.bodyMedium(),
+                            ),
+                            Text(
+                              '${(result['confidence'] * 100).toStringAsFixed(0)}%',
+                              style: AppTypography.bodySmall(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: AppSpacing.lg),
+                    // Quick tips
+                    Text('Quick Tips', style: AppTypography.headline()),
+                    const SizedBox(height: AppSpacing.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(
+                                AppSpacing.cardBorderRadius,
+                              ),
+                            ),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  topResult['label'],
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black,
-                                  ),
+                                Icon(
+                                  Icons.cut,
+                                  color: AppColors.warning,
+                                  size: 32,
                                 ),
+                                const SizedBox(height: AppSpacing.sm),
                                 Text(
-                                  'Confidence: ${(topResult['confidence'] * 100).toStringAsFixed(1)}%',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 14,
-                                    color: Colors.grey.shade600,
-                                  ),
+                                  'Prune Leaves',
+                                  style: AppTypography.label(),
+                                  textAlign: TextAlign.center,
                                 ),
                               ],
                             ),
                           ),
-                          _buildConfidenceBadge(topResult['confidence']),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(
+                                AppSpacing.cardBorderRadius,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.water_drop,
+                                  color: AppColors.info,
+                                  size: 32,
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                Text(
+                                  'Water care',
+                                  style: AppTypography.label(),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-
-                    const SizedBox(height: 16),
-
-                    // Treatment
-                    Text(
-                      'Treatment:',
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      dt.treatment[topResult['index']],
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: Colors.grey.shade700,
-                        height: 1.5,
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
+                    const SizedBox(height: AppSpacing.xxl),
                     // Action buttons
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  ScanDetailPage(scanResult: scanResult),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.brightGreen,
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.md,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppSpacing.buttonBorderRadius,
+                            ),
+                          ),
+                        ),
+                        child: Text(
+                          'View Treatment Plan',
+                          style: AppTypography.label(
+                            color: AppColors.darkBackground,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
                     Row(
                       children: [
                         Expanded(
@@ -301,48 +437,67 @@ class _ScanPageState extends State<ScanPage> {
                               _showFeedbackDialog(topResult, diseaseId);
                             },
                             style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: AppColors.mediumGreen),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              side: BorderSide(color: AppColors.brightGreen),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: AppSpacing.md,
+                              ),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.buttonBorderRadius,
+                                ),
                               ),
                             ),
                             child: Text(
-                              'Beri Feedback',
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.mediumGreen,
+                              'Disease Info',
+                              style: AppTypography.label(
+                                color: AppColors.brightGreen,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: AppSpacing.md),
                         Expanded(
-                          child: ElevatedButton(
-                            onPressed: () async {
+                          child: OutlinedButton(
+                            onPressed: () {
                               Navigator.pop(context);
-                              await _navigateToDetail(diseaseId);
                             },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.mediumGreen,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: AppColors.brightGreen),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: AppSpacing.md,
+                              ),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.buttonBorderRadius,
+                                ),
                               ),
                             ),
                             child: Text(
-                              'Lihat Detail',
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
+                              'Save Result',
+                              style: AppTypography.label(
+                                color: AppColors.brightGreen,
                               ),
                             ),
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: AppSpacing.md),
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showFeedbackDialog(topResult, diseaseId);
+                        },
+                        child: Text(
+                          'Report Incorrect Result',
+                          style: AppTypography.bodySmall(
+                            color: AppColors.error,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
                   ],
                 ),
               ),
@@ -351,6 +506,81 @@ class _ScanPageState extends State<ScanPage> {
         );
       },
     );
+  }
+
+  /// Build image preview with error handling
+  Widget _buildImagePreview(String imagePath) {
+    final file = File(imagePath);
+
+    return FutureBuilder<bool>(
+      future: file.exists(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(color: AppColors.brightGreen),
+          );
+        }
+
+        if (snapshot.hasError || snapshot.data == false) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.image_not_supported,
+                  size: 48,
+                  color: AppColors.textTertiary,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Image not found',
+                  style: AppTypography.bodySmall(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Image.file(
+          file,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.broken_image,
+                    size: 48,
+                    color: AppColors.textTertiary,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    'Failed to load image',
+                    style: AppTypography.bodySmall(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Get color based on confidence level
+  Color _getConfidenceColor(double confidence) {
+    if (confidence >= 0.8) {
+      return Colors.green;
+    } else if (confidence >= 0.6) {
+      return Colors.orange;
+    } else {
+      return Colors.red;
+    }
   }
 
   void _showFeedbackDialog(Map<String, dynamic> result, String diseaseId) {
@@ -373,8 +603,8 @@ class _ScanPageState extends State<ScanPage> {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Terima kasih atas feedback Anda!'),
-                  backgroundColor: AppColors.mediumGreen,
+                  content: const Text('Terima kasih atas feedback Anda!'),
+                  backgroundColor: AppColors.brightGreen,
                 ),
               );
             }
@@ -382,18 +612,6 @@ class _ScanPageState extends State<ScanPage> {
         },
       ),
     );
-  }
-
-  Future<void> _navigateToDetail(String diseaseId) async {
-    final disease = await _diseaseService.getDiseaseById(diseaseId);
-    if (disease != null && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => DiseaseDetailPage(disease: disease),
-        ),
-      );
-    }
   }
 
   void _onItemTapped(int index) {
@@ -419,33 +637,6 @@ class _ScanPageState extends State<ScanPage> {
     }
   }
 
-  Widget _buildConfidenceBadge(double confidence) {
-    Color color;
-    if (confidence >= 0.8) {
-      color = Colors.green;
-    } else if (confidence >= 0.5) {
-      color = Colors.orange;
-    } else {
-      color = Colors.red;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        '${(confidence * 100).toStringAsFixed(0)}%',
-        style: GoogleFonts.poppins(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     try {
@@ -461,26 +652,13 @@ class _ScanPageState extends State<ScanPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: AppColors.mediumGreen,
-        elevation: 0,
-        centerTitle: true,
-        title: Text(
-          'Scan Tanaman',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 20,
-          ),
-        ),
-      ),
+      backgroundColor: AppColors.darkBackground,
       body: FutureBuilder<void>(
         future: _initCameraFuture,
         builder: (_, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return Center(
-              child: CircularProgressIndicator(color: AppColors.mediumGreen),
+              child: CircularProgressIndicator(color: AppColors.brightGreen),
             );
           }
 
@@ -489,18 +667,17 @@ class _ScanPageState extends State<ScanPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
+                  Icon(Icons.error_outline, size: 64, color: AppColors.error),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
                     'Kamera tidak tersedia',
-                    style: GoogleFonts.poppins(fontSize: 16, color: Colors.red),
+                    style: AppTypography.bodyLarge(color: AppColors.error),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     'Error: ${snapshot.error}',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.grey,
+                    style: AppTypography.bodySmall(
+                      color: AppColors.textTertiary,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -511,50 +688,33 @@ class _ScanPageState extends State<ScanPage> {
 
           return Column(
             children: [
-              // Camera Preview
+              _buildScannerHeader(),
               Expanded(
                 child: Stack(
                   children: [
-                    // Camera
                     SizedBox(
                       width: double.infinity,
                       child: CameraPreview(_camController!),
                     ),
-
-                    // Overlay frame
-                    Center(
-                      child: Container(
-                        width: MediaQuery.of(context).size.width * 0.8,
-                        height: MediaQuery.of(context).size.width * 0.8,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: AppColors.mediumGreen,
-                            width: 3,
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-
-                    // Guide text
+                    _buildCameraFrame(context),
+                    _buildCornerIndicators(),
                     Positioned(
                       bottom: 20,
                       left: 0,
                       right: 0,
                       child: Text(
-                        'Posisikan daun di dalam frame',
+                        'Point camera at a leaf',
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(color: Colors.black54, blurRadius: 4),
-                          ],
-                        ),
+                        style:
+                            AppTypography.bodyMedium(
+                              color: AppColors.textPrimary,
+                            ).copyWith(
+                              shadows: [
+                                Shadow(color: Colors.black54, blurRadius: 4),
+                              ],
+                            ),
                       ),
                     ),
-
-                    // Processing indicator
                     if (_isProcessing)
                       Container(
                         color: Colors.black54,
@@ -563,14 +723,13 @@ class _ScanPageState extends State<ScanPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               CircularProgressIndicator(
-                                color: AppColors.mediumGreen,
+                                color: AppColors.brightGreen,
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: AppSpacing.md),
                               Text(
-                                'Menganalisis...',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  color: Colors.white,
+                                'Analyzing...',
+                                style: AppTypography.bodyLarge(
+                                  color: AppColors.textPrimary,
                                 ),
                               ),
                             ],
@@ -580,41 +739,7 @@ class _ScanPageState extends State<ScanPage> {
                   ],
                 ),
               ),
-
-              // Capture Button
-              Container(
-                padding: const EdgeInsets.all(24),
-                color: Colors.white,
-                child: GestureDetector(
-                  onTap: _isProcessing ? null : _handleScan,
-                  child: Container(
-                    height: 70,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: _isProcessing
-                          ? Colors.grey
-                          : AppColors.mediumGreen,
-                    ),
-                    child: Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.camera_alt, color: Colors.white, size: 28),
-                          const SizedBox(width: 12),
-                          Text(
-                            _isProcessing ? 'Memproses...' : 'PERIKSA',
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+              _buildScannerControls(),
             ],
           );
         },
@@ -624,5 +749,390 @@ class _ScanPageState extends State<ScanPage> {
         onTap: _onItemTapped,
       ),
     );
+  }
+
+  Widget _buildScannerHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.lg,
+      ),
+      color: AppColors.surface,
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ARBTILANT AI',
+                  style: AppTypography.bodySmall(color: AppColors.brightGreen),
+                ),
+                Text('Scanner', style: AppTypography.headline()),
+              ],
+            ),
+            IconButton(
+              icon: Icon(Icons.help_outline, color: AppColors.brightGreen),
+              onPressed: () {},
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCameraFrame(BuildContext context) {
+    final frameSize = MediaQuery.of(context).size.width * 0.75;
+    return Center(
+      child: Container(
+        width: frameSize,
+        height: frameSize,
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.brightGreen, width: 2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCornerIndicators() {
+    final frameSize = MediaQuery.of(context).size.width * 0.75;
+    final cornerSize = 20.0;
+    final offset = (MediaQuery.of(context).size.width - frameSize) / 2;
+
+    return Stack(
+      children: [
+        // Top-left corner
+        Positioned(
+          left: offset,
+          top: (MediaQuery.of(context).size.height - frameSize) / 2,
+          child: Container(
+            width: cornerSize,
+            height: cornerSize,
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: AppColors.brightGreen, width: 3),
+                left: BorderSide(color: AppColors.brightGreen, width: 3),
+              ),
+            ),
+          ),
+        ),
+        // Top-right corner
+        Positioned(
+          right: offset,
+          top: (MediaQuery.of(context).size.height - frameSize) / 2,
+          child: Container(
+            width: cornerSize,
+            height: cornerSize,
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: AppColors.brightGreen, width: 3),
+                right: BorderSide(color: AppColors.brightGreen, width: 3),
+              ),
+            ),
+          ),
+        ),
+        // Bottom-left corner
+        Positioned(
+          left: offset,
+          bottom: (MediaQuery.of(context).size.height - frameSize) / 2,
+          child: Container(
+            width: cornerSize,
+            height: cornerSize,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppColors.brightGreen, width: 3),
+                left: BorderSide(color: AppColors.brightGreen, width: 3),
+              ),
+            ),
+          ),
+        ),
+        // Bottom-right corner
+        Positioned(
+          right: offset,
+          bottom: (MediaQuery.of(context).size.height - frameSize) / 2,
+          child: Container(
+            width: cornerSize,
+            height: cornerSize,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppColors.brightGreen, width: 3),
+                right: BorderSide(color: AppColors.brightGreen, width: 3),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScannerControls() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      color: AppColors.surface,
+      child: Column(
+        children: [
+          // Mode buttons
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildModeButton('MACRO', _cameraMode == 'MACRO'),
+              const SizedBox(width: AppSpacing.lg),
+              _buildModeButton('AUTO', _cameraMode == 'AUTO'),
+              const SizedBox(width: AppSpacing.lg),
+              _buildModeButton('WIDE', _cameraMode == 'WIDE'),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          // Capture button and controls
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: Icon(
+                  _flashEnabled ? Icons.flash_on : Icons.flash_off,
+                  color: _flashEnabled
+                      ? AppColors.warning
+                      : AppColors.brightGreen,
+                ),
+                onPressed: _toggleFlash,
+              ),
+              GestureDetector(
+                onTap: _isProcessing ? null : _handleScan,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isProcessing
+                        ? AppColors.textTertiary
+                        : AppColors.brightGreen,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.brightGreen.withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.camera_alt,
+                    color: AppColors.darkBackground,
+                    size: 40,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.settings, color: AppColors.brightGreen),
+                onPressed: _showCameraSettings,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeButton(String label, bool isActive) {
+    return GestureDetector(
+      onTap: () => _setMode(label),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.brightGreen : AppColors.lightSurface,
+          borderRadius: BorderRadius.circular(AppSpacing.buttonBorderRadius),
+        ),
+        child: Text(
+          label,
+          style: AppTypography.bodySmall(
+            color: isActive
+                ? AppColors.darkBackground
+                : AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _setMode(String mode) {
+    setState(() {
+      _cameraMode = mode;
+    });
+
+    // Apply zoom based on mode
+    if (_camController != null && _camController!.value.isInitialized) {
+      switch (mode) {
+        case 'MACRO':
+          _zoomLevel = 1.0; // No zoom for macro
+          break;
+        case 'AUTO':
+          _zoomLevel = 1.5; // Medium zoom
+          break;
+        case 'WIDE':
+          _zoomLevel = 0.5; // Wide angle (less zoom)
+          break;
+      }
+      _camController!.setZoomLevel(_zoomLevel);
+    }
+
+    debugPrint('📷 Camera mode changed to: $mode (zoom: $_zoomLevel)');
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_camController == null || !_camController!.value.isInitialized) {
+      return;
+    }
+
+    try {
+      setState(() {
+        _flashEnabled = !_flashEnabled;
+      });
+
+      await _camController!.setFlashMode(
+        _flashEnabled ? FlashMode.torch : FlashMode.off,
+      );
+
+      debugPrint('💡 Flash: ${_flashEnabled ? 'ON' : 'OFF'}');
+    } catch (e) {
+      debugPrint('❌ Error toggling flash: $e');
+      setState(() {
+        _flashEnabled = !_flashEnabled;
+      });
+    }
+  }
+
+  void _showCameraSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Camera Settings', style: AppTypography.headline()),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Zoom control
+                  Text('Zoom Level', style: AppTypography.label()),
+                  const SizedBox(height: AppSpacing.md),
+                  Slider(
+                    value: _zoomLevel,
+                    min: 0.5,
+                    max: 3.0,
+                    divisions: 25,
+                    label: _zoomLevel.toStringAsFixed(1),
+                    activeColor: AppColors.brightGreen,
+                    inactiveColor: AppColors.lightSurface,
+                    onChanged: (value) {
+                      setState(() {
+                        _zoomLevel = value;
+                      });
+                      if (_camController != null &&
+                          _camController!.value.isInitialized) {
+                        _camController!.setZoomLevel(value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Flash toggle
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Flash', style: AppTypography.label()),
+                      Switch(
+                        value: _flashEnabled,
+                        activeColor: AppColors.brightGreen,
+                        onChanged: (value) {
+                          setState(() {
+                            _flashEnabled = value;
+                          });
+                          _toggleFlash();
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Mode info
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.lightSurface,
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.cardBorderRadius,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Current Mode: $_cameraMode',
+                          style: AppTypography.label(),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          _getModeDescription(_cameraMode),
+                          style: AppTypography.bodySmall(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.brightGreen,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: AppSpacing.md,
+                        ),
+                      ),
+                      child: Text(
+                        'Close',
+                        style: AppTypography.label(
+                          color: AppColors.darkBackground,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _getModeDescription(String mode) {
+    switch (mode) {
+      case 'MACRO':
+        return 'Best for close-up shots of leaves and small details';
+      case 'AUTO':
+        return 'Automatic mode for general plant scanning';
+      case 'WIDE':
+        return 'Wide angle mode for full plant view';
+      default:
+        return '';
+    }
   }
 }
